@@ -120,6 +120,13 @@ void drawCube(float r, float g, float b) {
 }
 
 void drawMap() {
+    // Desenha o chão branco
+    glPushMatrix();
+    glTranslatef(MAP_SIZE / 2.0f - 0.5f, -1.0f, MAP_SIZE / 2.0f - 0.5f); // Centraliza
+    glScalef((float)MAP_SIZE, 0.1f, (float)MAP_SIZE); // Tamanho do chão
+    glColor3f(1.0f, 1.0f, 1.0f); // <- Aqui é onde você pode mudar a cor do chão
+    glutSolidCube(1.0f);
+    glPopMatrix();
     for (int x = 0; x < MAP_SIZE; x++) {
         for (int z = 0; z < MAP_SIZE; z++) {
             glPushMatrix();
