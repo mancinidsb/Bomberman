@@ -227,13 +227,34 @@ void drawExplosions() {
     for (size_t i = 0; i < bombas.size(); i++) {
         if (bombas[i].explodiu && bombas[i].frame_explosao > 0) {
             glColor3f(1.0f, 0.3f, 0.0f);
+            
+            
+            //  Centro da explosão
+		    glPushMatrix();
+		    glTranslatef((float)bombas[i].x, 0.0f, (float)bombas[i].z);
+		    glutSolidSphere(0.3, 10, 10);
+		    glPopMatrix();
+            
+            
+            
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (abs(dx) + abs(dz) == 1) {
-                        glPushMatrix();
-                        glTranslatef((float)(bombas[i].x + dx), 0.0f, (float)(bombas[i].z + dz));
-                        glutSolidSphere(0.3, 10, 10);
-                        glPopMatrix();
+                        // glPushMatrix();
+                        // glTranslatef((float)(bombas[i].x + dx), 0.0f, (float)(bombas[i].z + dz));
+                        // glutSolidSphere(0.3, 10, 10);
+                        // glPopMatrix();
+                        
+                        int nx = bombas[i].x + dx;
+			            int nz = bombas[i].z + dz;
+			
+			            // Só desenha explosão se não for parede sólida
+			            if (map[nx][nz] != 1) {
+			                glPushMatrix();
+			                glTranslatef((float)nx, 0.0f, (float)nz);
+			                glutSolidSphere(0.3, 10, 10);
+			                glPopMatrix();
+			            }
                     }
                 }
             }
