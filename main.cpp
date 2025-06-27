@@ -416,29 +416,32 @@ void moveEnemies() {
             }
         }
         
-        // Verifica colisão com o jogador
-        if (enemies[i].x == player_x && enemies[i].z == player_z && player_alive) {
-            player_alive = false; // Jogador morre se tocar em qualquer inimigo
-        }
         
-        // Verifica se há blocos quebráveis ao redor
-		bool perto_de_bloco = false;
+        
+        bool perto_de_bloco = false;
+		bool perto_do_jogador = false;
+		
+		// Verifica vizinhança
 		for (int dx = -1; dx <= 1; dx++) {
 		    for (int dz = -1; dz <= 1; dz++) {
-		        if (abs(dx) + abs(dz) == 1) { // só nas 4 direções (cima, baixo, esquerda, direita)
+		        if (abs(dx) + abs(dz) == 1) {
 		            int nx = enemies[i].x + dx;
 		            int nz = enemies[i].z + dz;
-		            if (map[nx][nz] == 2) {
+		
+		            if (map[nx][nz] == 2)
 		                perto_de_bloco = true;
-		                break;
-		            }
+		
+		            if (player_alive && player_x == nx && player_z == nz)
+		                perto_do_jogador = true;
 		        }
 		    }
 		}
-		// Aumenta a chance se estiver perto de bloco
-
-		int chance = perto_de_bloco ? 5 : 20;
-
+		
+		// Define a chance: maior se perto do jogador, média se perto de bloco, pequena caso contrário
+		int chance = 30; // padrão: chance baixa
+		if (perto_de_bloco) chance = 10; // médio (10%)
+		if (perto_do_jogador) chance = 3; // alto (33%)
+		
 		if (rand() % chance == 0 && !hasBomb(enemies[i].x, enemies[i].z)) {
 		    Bomba nova;
 		    nova.x = enemies[i].x;
@@ -447,8 +450,10 @@ void moveEnemies() {
 		    nova.explodiu = false;
 		    nova.frame_explosao = 0;
 		    bombas.push_back(nova);
-		    fuga_inimigo[i] = 4;
+		    fuga_inimigo[i] = 4; // inimigo entra em fuga imediatamente
 		}
+        
+        
         
  
     }
