@@ -9,15 +9,24 @@
 #include <cmath>
 using namespace std;
 
-#define MAP_SIZE 10
+#define MAP_SIZE 13
 #define ESC 27
 
 int map[MAP_SIZE][MAP_SIZE]; // 0: vazio, 1: parede, 2: bloco destruivel
 int player_x = 1, player_z = 1;
+bool player_alive = true;
+
+struct Enemy {
+    int x, z;
+    bool alive;
+};
+
+vector<Enemy> enemies;
+const int NUM_ENEMIES = 3; // Total de inimigos (1 original + 2 novos)
 
 float cam_angle_y = 45.0f;
 float cam_angle_x = 45.0f;
-float cam_dist = 15.0f;
+float cam_dist = 18.0f; // Aumentado para acomodar o mapa maior
 
 struct Bomba {
     int x, z;
@@ -39,7 +48,70 @@ void initMap() {
                 map[x][z] = (rand() % 4 == 0 ? 2 : 0); // bloco aleatorio ou vazio
         }
     }
-    map[1][1] = 0; // espaco inicial do jogador
+    
+    // Garante uma área segura para o jogador iniciar
+    map[1][1] = 0; // posição inicial do jogador
+    map[1][2] = 0; // caminho para baixo
+    map[2][1] = 0; // caminho para direita
+    
+    // Garante que o jogador tenha pelo menos um caminho para explorar
+    // Cria um caminho aleatório a partir da posição inicial
+    int path_length = rand() % 5 + 3; // caminho de 3 a 7 blocos
+    int current_x = 2;
+    int current_z = 1;
+    
+    for (int i = 0; i < path_length; i++) {
+        // Escolhe uma direção aleatória (direita ou para baixo)
+        if (rand() % 2 == 0 && current_x < MAP_SIZE - 2) {
+            current_x++;
+            // Se for uma parede fixa, pula
+            if (current_x % 2 == 0 && current_z % 2 == 0) {
+                current_x++;
+            }
+            if (current_x < MAP_SIZE - 1)
+                map[current_x][current_z] = 0; // limpa o caminho
+        } else if (current_z < MAP_SIZE - 2) {
+            current_z++;
+            // Se for uma parede fixa, pula
+            if (current_x % 2 == 0 && current_z % 2 == 0) {
+                current_z++;
+            }
+            if (current_z < MAP_SIZE - 1)
+                map[current_x][current_z] = 0; // limpa o caminho
+        }
+    }
+    
+    // Limpa o vetor de inimigos e inicializa com NUM_ENEMIES inimigos
+    enemies.clear();
+    enemies.resize(NUM_ENEMIES);
+    
+    // Inicializa cada inimigo em uma posição aleatória válida
+    for (int i = 0; i < NUM_ENEMIES; i++) {
+        bool valid_position = false;
+        while (!valid_position) {
+            int x = rand() % (MAP_SIZE - 2) + 1;
+            int z = rand() % (MAP_SIZE - 2) + 1;
+            
+            // Verifica se a posição é válida (vazia e não muito perto do jogador)
+            if (map[x][z] == 0 && (abs(x - player_x) + abs(z - player_z) >= 4)) {
+                // Verifica se não está na mesma posição que outro inimigo
+                bool overlap = false;
+                for (int j = 0; j < i; j++) {
+                    if (x == enemies[j].x && z == enemies[j].z) {
+                        overlap = true;
+                        break;
+                    }
+                }
+                
+                if (!overlap) {
+                    enemies[i].x = x;
+                    enemies[i].z = z;
+                    enemies[i].alive = true;
+                    valid_position = true;
+                }
+            }
+        }
+    }
 }
 
 void drawCube(float r, float g, float b) {
@@ -62,11 +134,28 @@ void drawMap() {
 }
 
 void drawPlayer() {
-    glPushMatrix();
-    glTranslatef((float)player_x, 0.0f, (float)player_z);
-    glColor3f(0.0f, 0.0f, 1.0f);
-    glutSolidSphere(0.4, 16, 16);
-    glPopMatrix();
+    if (player_alive) {
+        glPushMatrix();
+        glTranslatef((float)player_x, 0.0f, (float)player_z);
+        glColor3f(0.0f, 0.0f, 1.0f);
+        glutSolidSphere(0.4, 16, 16);
+        glPopMatrix();
+    }
+}
+
+void drawEnemies() {
+    for (int i = 0; i < enemies.size(); i++) {
+        if (enemies[i].alive) {
+            glPushMatrix();
+            glTranslatef((float)enemies[i].x, 0.0f, (float)enemies[i].z);
+            
+            // Todos os inimigos com a mesma cor vermelha
+            glColor3f(1.0f, 0.0f, 0.0f); // Vermelho
+            
+            glutSolidSphere(0.4, 16, 16);
+            glPopMatrix();
+        }
+    }
 }
 
 void drawBombs() {
@@ -108,7 +197,8 @@ void updateCamera() {
     float eye_y = cam_dist * sin(rad_x);
     float eye_z = cam_dist * cos(rad_x) * cos(rad_y);
 
-    gluLookAt(eye_x, eye_y, eye_z, 5, 0, 5, 0, 1, 0);
+    // Ajustado para olhar para o centro do mapa 13x13
+    gluLookAt(eye_x, eye_y, eye_z, 6, 0, 6, 0, 1, 0);
 }
 
 void display() {
@@ -119,14 +209,145 @@ void display() {
 
     drawMap();
     drawPlayer();
+    drawEnemies();
     drawBombs();
     drawExplosions();
 
     glutSwapBuffers();
 }
 
+// Verifica se o jogador está na explosão
+bool playerInExplosion(int bomb_x, int bomb_z) {
+    // Verifica se o jogador está no centro da explosão
+    if (player_x == bomb_x && player_z == bomb_z)
+        return true;
+    
+    // Verifica se o jogador está nos braços da explosão
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            if (abs(dx) + abs(dz) == 1) {
+                int nx = bomb_x + dx, nz = bomb_z + dz;
+                // Só verifica se não há parede bloqueando
+                if (map[nx][nz] != 1 && player_x == nx && player_z == nz)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Verifica se algum inimigo está na explosão e retorna o índice do inimigo atingido
+// Retorna -1 se nenhum inimigo foi atingido
+int enemyInExplosion(int bomb_x, int bomb_z) {
+    for (int i = 0; i < enemies.size(); i++) {
+        if (!enemies[i].alive) continue;
+        
+        // Verifica se o inimigo está no centro da explosão
+        if (enemies[i].x == bomb_x && enemies[i].z == bomb_z)
+            return i;
+        
+        // Verifica se o inimigo está nos braços da explosão
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (abs(dx) + abs(dz) == 1) {
+                    int nx = bomb_x + dx, nz = bomb_z + dz;
+                    // Só verifica se não há parede bloqueando
+                    if (map[nx][nz] != 1 && enemies[i].x == nx && enemies[i].z == nz)
+                        return i;
+                }
+            }
+        }
+    }
+    return -1; // Nenhum inimigo atingido
+}
+
+// Verifica se há outra bomba na explosão
+void checkBombChainReaction(int bomb_x, int bomb_z) {
+    for (size_t j = 0; j < bombas.size(); j++) {
+        if (bombas[j].timer > 0 && !bombas[j].explodiu) {
+            // Verifica se a bomba está no centro da explosão
+            if (bombas[j].x == bomb_x && bombas[j].z == bomb_z)
+                bombas[j].timer = 0;
+            
+            // Verifica se a bomba está nos braços da explosão
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (abs(dx) + abs(dz) == 1) {
+                        int nx = bomb_x + dx, nz = bomb_z + dz;
+                        // Só verifica se não há parede bloqueando
+                        if (map[nx][nz] != 1 && 
+                            bombas[j].x == nx && bombas[j].z == nz)
+                            bombas[j].timer = 0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Verifica se há uma bomba na posição (x,z)
+bool hasBomb(int x, int z) {
+    for (size_t i = 0; i < bombas.size(); i++) {
+        if (!bombas[i].explodiu && bombas[i].timer > 0 && 
+            bombas[i].x == x && bombas[i].z == z) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Movimento aleatório dos inimigos
+void moveEnemies() {
+    for (int i = 0; i < enemies.size(); i++) {
+        if (!enemies[i].alive) continue;
+        
+        // Escolhe uma direção aleatória
+        int dir = rand() % 4;
+        int dx = 0, dz = 0;
+        
+        if (dir == 0) dx = -1;      // esquerda
+        else if (dir == 1) dx = 1;  // direita
+        else if (dir == 2) dz = -1; // cima
+        else if (dir == 3) dz = 1;  // baixo
+        
+        int nx = enemies[i].x + dx;
+        int nz = enemies[i].z + dz;
+        
+        // Verifica se o movimento é válido (não colide com paredes, blocos ou bombas)
+        if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
+            // Verifica se não colide com outro inimigo
+            bool collision = false;
+            for (int j = 0; j < enemies.size(); j++) {
+                if (j != i && enemies[j].alive && nx == enemies[j].x && nz == enemies[j].z) {
+                    collision = true;
+                    break;
+                }
+            }
+            
+            if (!collision) {
+                enemies[i].x = nx;
+                enemies[i].z = nz;
+            }
+        }
+        
+        // Verifica colisão com o jogador
+        if (enemies[i].x == player_x && enemies[i].z == player_z && player_alive) {
+            player_alive = false; // Jogador morre se tocar em qualquer inimigo
+        }
+    }
+}
+
 void timer(int v) {
     vector<Bomba> novas;
+    bool player_hit = false;
+    
+    // Movimento dos inimigos a cada 2 ciclos (para não ficar muito rápido)
+    static int enemy_move_counter = 0;
+    if (++enemy_move_counter >= 2) {
+        moveEnemies();
+        enemy_move_counter = 0;
+    }
+    
     for (size_t i = 0; i < bombas.size(); i++) {
         if (bombas[i].timer > 0) {
             // Ainda esta contando para explodir
@@ -143,11 +364,25 @@ void timer(int v) {
                     }
                 }
             }
+            
+            // Verifica colisão da explosão com o jogador
+            if (playerInExplosion(bombas[i].x, bombas[i].z)) {
+                player_hit = true;
+            }
+            
+            // Verifica colisão da explosão com os inimigos
+            int hit_enemy_index = enemyInExplosion(bombas[i].x, bombas[i].z);
+            if (hit_enemy_index >= 0) {
+                enemies[hit_enemy_index].alive = false;
+            }
+            
+            // Verifica colisão da explosão com outras bombas (reação em cadeia)
+            checkBombChainReaction(bombas[i].x, bombas[i].z);
 
             bombas[i].explodiu = true;
             bombas[i].frame_explosao = 4;  // ? tempo de duracao da explosao (4 ciclos = 2s se timerFunc=500ms)
             novas.push_back(bombas[i]);
-        } 
+        }
         else if (bombas[i].frame_explosao > 0) {
             // Esta no tempo da explosao ainda
             bombas[i].frame_explosao--;
@@ -157,8 +392,33 @@ void timer(int v) {
     }
 
     bombas = novas;
+    
+    // Jogador morre se for atingido por uma explosão
+    if (player_hit) {
+        player_alive = false;
+    }
+    
+    // Verifica se o jogo acabou
+    if (!player_alive) {
+        // Jogador perdeu
+        // Aqui você pode adicionar código para reiniciar o jogo ou mostrar uma mensagem
+    } else {
+        // Verifica se todos os inimigos estão mortos
+        bool all_enemies_dead = true;
+        for (int i = 0; i < enemies.size(); i++) {
+            if (enemies[i].alive) {
+                all_enemies_dead = false;
+                break;
+            }
+        }
+        
+        if (all_enemies_dead) {
+            // Jogador venceu
+            // Aqui você pode adicionar código para passar para o próximo nível ou mostrar uma mensagem
+        }
+    }
 
-    glutTimerFunc(150, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
+    glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
     glutPostRedisplay();
 }
 
@@ -183,6 +443,7 @@ void keyboard(unsigned char key, int, int) {
     glutPostRedisplay();
 }
 
+
 void special(int key, int, int) {
     int dx = 0, dz = 0;
     if (key == GLUT_KEY_UP) dz = -1;
@@ -191,7 +452,8 @@ void special(int key, int, int) {
     else if (key == GLUT_KEY_RIGHT) dx = 1;
 
     int nx = player_x + dx, nz = player_z + dz;
-    if (map[nx][nz] == 0) {
+    // Verifica colisão com paredes, blocos e bombas
+    if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
         player_x = nx;
         player_z = nz;
     }
