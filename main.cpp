@@ -22,7 +22,9 @@ struct Enemy {
 };
 
 vector<Enemy> enemies;
+vector<int> fuga_inimigo;
 const int NUM_ENEMIES = 3; // Total de inimigos (1 original + 2 novos)
+bool timer_ativo = false;
 
 float cam_angle_y = 45.0f;
 float cam_angle_x = 45.0f;
@@ -112,6 +114,8 @@ void initMap() {
             }
         }
     }
+    fuga_inimigo.assign(NUM_ENEMIES, 0);
+
 }
 
 void drawCube(float r, float g, float b) {
@@ -119,7 +123,56 @@ void drawCube(float r, float g, float b) {
     glutSolidCube(1.0);
 }
 
+
+void drawGameOver() {
+    glDisable(GL_DEPTH_TEST); // Evita que o texto fique escondido
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 800, 0, 600); // Tela 800x600
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(0, 0, 0); // Tela preta
+    glBegin(GL_QUADS);
+        glVertex2i(0, 0);
+        glVertex2i(800, 0);
+        glVertex2i(800, 600);
+        glVertex2i(0, 600);
+    glEnd();
+
+    glColor3f(1.0, 0.0, 0.0); // Texto vermelho
+    glRasterPos2i(330, 300);
+    const char* msg = "GAME OVER";
+    for (int i = 0; msg[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg[i]);
+    }
+    
+    glColor3f(1.0, 1.0, 1.0);
+    glRasterPos2i(310, 270);
+    const char* msg2 = "Press R to restart";
+    for (int i = 0; msg2[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg2[i]);
+    }
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
+
+
 void drawMap() {
+    // Desenha o chão branco
+    glPushMatrix();
+    glTranslatef(MAP_SIZE / 2.0f - 0.5f, -1.0f, MAP_SIZE / 2.0f - 0.5f); // Centraliza
+    glScalef((float)MAP_SIZE, 0.1f, (float)MAP_SIZE); // Tamanho do chão
+    glColor3f(1.0f, 1.0f, 1.0f); // <- Aqui é onde você pode mudar a cor do chão
+    glutSolidCube(1.0f);
+    glPopMatrix();
     for (int x = 0; x < MAP_SIZE; x++) {
         for (int z = 0; z < MAP_SIZE; z++) {
             glPushMatrix();
@@ -174,13 +227,34 @@ void drawExplosions() {
     for (size_t i = 0; i < bombas.size(); i++) {
         if (bombas[i].explodiu && bombas[i].frame_explosao > 0) {
             glColor3f(1.0f, 0.3f, 0.0f);
+            
+            
+            //  Centro da explosão
+		    glPushMatrix();
+		    glTranslatef((float)bombas[i].x, 0.0f, (float)bombas[i].z);
+		    glutSolidSphere(0.3, 10, 10);
+		    glPopMatrix();
+            
+            
+            
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (abs(dx) + abs(dz) == 1) {
-                        glPushMatrix();
-                        glTranslatef((float)(bombas[i].x + dx), 0.0f, (float)(bombas[i].z + dz));
-                        glutSolidSphere(0.3, 10, 10);
-                        glPopMatrix();
+                        // glPushMatrix();
+                        // glTranslatef((float)(bombas[i].x + dx), 0.0f, (float)(bombas[i].z + dz));
+                        // glutSolidSphere(0.3, 10, 10);
+                        // glPopMatrix();
+                        
+                        int nx = bombas[i].x + dx;
+			            int nz = bombas[i].z + dz;
+			
+			            // Só desenha explosão se não for parede sólida
+			            if (map[nx][nz] != 1) {
+			                glPushMatrix();
+			                glTranslatef((float)nx, 0.0f, (float)nz);
+			                glutSolidSphere(0.3, 10, 10);
+			                glPopMatrix();
+			            }
                     }
                 }
             }
@@ -212,6 +286,10 @@ void display() {
     drawEnemies();
     drawBombs();
     drawExplosions();
+
+    if (!player_alive) {
+        drawGameOver(); // Mostra a tela de Game Over
+    }
 
     glutSwapBuffers();
 }
@@ -301,14 +379,44 @@ void moveEnemies() {
     for (int i = 0; i < enemies.size(); i++) {
         if (!enemies[i].alive) continue;
         
-        // Escolhe uma direção aleatória
-        int dir = rand() % 4;
         int dx = 0, dz = 0;
+		if (fuga_inimigo[i] > 0) {
+		    // Tenta fugir da posição da bomba
+		    int max_dist = -1;
+		    int best_dx = 0, best_dz = 0;
+		
+		    for (int dir = 0; dir < 4; dir++) {
+		        int test_dx = (dir == 0) ? -1 : (dir == 1) ? 1 : 0;
+		        int test_dz = (dir == 2) ? -1 : (dir == 3) ? 1 : 0;
+		
+		        int nx = enemies[i].x + test_dx;
+		        int nz = enemies[i].z + test_dz;
+		
+		        if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
+		            // Calcula distância até a bomba mais próxima
+		            int min_dist = 1000;
+		            for (size_t b = 0; b < bombas.size(); b++) {
+		                int dist = abs(nx - bombas[b].x) + abs(nz - bombas[b].z);
+		                if (dist < min_dist) min_dist = dist;
+		            }
+		            if (min_dist > max_dist) {
+		                max_dist = min_dist;
+		                best_dx = test_dx;
+		                best_dz = test_dz;
+		            }
+		        }
+		    }
+		
+		    dx = best_dx;
+		    dz = best_dz;
+		    fuga_inimigo[i]--;
+		} else {
+		    // Movimento aleatório normal
+		    int dir = rand() % 4;
+		    dx = (dir == 0) ? -1 : (dir == 1) ? 1 : 0;
+		    dz = (dir == 2) ? -1 : (dir == 3) ? 1 : 0;
+		}
         
-        if (dir == 0) dx = -1;      // esquerda
-        else if (dir == 1) dx = 1;  // direita
-        else if (dir == 2) dz = -1; // cima
-        else if (dir == 3) dz = 1;  // baixo
         
         int nx = enemies[i].x + dx;
         int nz = enemies[i].z + dz;
@@ -330,17 +438,53 @@ void moveEnemies() {
             }
         }
         
-        // Verifica colisão com o jogador
-        if (enemies[i].x == player_x && enemies[i].z == player_z && player_alive) {
-            player_alive = false; // Jogador morre se tocar em qualquer inimigo
-        }
+        
+        
+        bool perto_de_bloco = false;
+		bool perto_do_jogador = false;
+		
+		// Verifica vizinhança
+		for (int dx = -1; dx <= 1; dx++) {
+		    for (int dz = -1; dz <= 1; dz++) {
+		        if (abs(dx) + abs(dz) == 1) {
+		            int nx = enemies[i].x + dx;
+		            int nz = enemies[i].z + dz;
+		
+		            if (map[nx][nz] == 2)
+		                perto_de_bloco = true;
+		
+		            if (player_alive && player_x == nx && player_z == nz)
+		                perto_do_jogador = true;
+		        }
+		    }
+		}
+		
+		// Define a chance: maior se perto do jogador, média se perto de bloco, pequena caso contrário
+		int chance = 30; // padrão: chance baixa
+		if (perto_de_bloco) chance = 10; // médio (10%)
+		if (perto_do_jogador) chance = 3; // alto (33%)
+		
+		if (rand() % chance == 0 && !hasBomb(enemies[i].x, enemies[i].z)) {
+		    Bomba nova;
+		    nova.x = enemies[i].x;
+		    nova.z = enemies[i].z;
+		    nova.timer = 4;
+		    nova.explodiu = false;
+		    nova.frame_explosao = 0;
+		    bombas.push_back(nova);
+		    fuga_inimigo[i] = 4; // inimigo entra em fuga imediatamente
+		}
+        
+        
+        
+ 
     }
 }
 
 void timer(int v) {
     vector<Bomba> novas;
     bool player_hit = false;
-    
+    if (!player_alive) return;
     // Movimento dos inimigos a cada 2 ciclos (para não ficar muito rápido)
     static int enemy_move_counter = 0;
     if (++enemy_move_counter >= 2) {
@@ -418,8 +562,14 @@ void timer(int v) {
         }
     }
 
-    glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
-    glutPostRedisplay();
+    // glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
+    // glutPostRedisplay();
+    
+    if (player_alive || !timer_ativo) {
+	    glutTimerFunc(400, timer, 0);
+	}
+	
+	glutPostRedisplay();
 }
 
 
@@ -439,6 +589,20 @@ void keyboard(unsigned char key, int, int) {
     else if (key == 'x') cam_angle_x += 5;
     else if (key == '-') cam_dist += 1.0f;
     else if (key == '+') cam_dist -= 1.0f;
+    else if (key == 'r' || key == 'R') {
+        player_alive = true;
+        player_x = 1;
+        player_z = 1;
+        bombas.clear();
+        initMap(); // reinicia o jogo
+        
+        // Reinicia o timer do jogo
+    	// glutTimerFunc(100, timer, 0);
+    	if (!timer_ativo) {
+	        timer_ativo = true;
+	        glutTimerFunc(100, timer, 0);
+	    }
+    }
 
     glutPostRedisplay();
 }
@@ -451,12 +615,24 @@ void special(int key, int, int) {
     else if (key == GLUT_KEY_LEFT) dx = -1;
     else if (key == GLUT_KEY_RIGHT) dx = 1;
 
-    int nx = player_x + dx, nz = player_z + dz;
-    // Verifica colisão com paredes, blocos e bombas
-    if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
-        player_x = nx;
-        player_z = nz;
-    }
+	int nx = player_x + dx, nz = player_z + dz;
+
+	// Verifica se há inimigo no destino
+	bool tem_inimigo = false;
+	for (int i = 0; i < enemies.size(); i++) {
+	    if (enemies[i].alive && enemies[i].x == nx && enemies[i].z == nz) {
+	        tem_inimigo = true;
+	        break;
+	    }
+	}
+	
+	// Só anda se o destino for livre, sem bomba nem inimigo
+	if (map[nx][nz] == 0 && !hasBomb(nx, nz) && !tem_inimigo) {
+	    player_x = nx;
+	    player_z = nz;
+	}
+	
+	
     glutPostRedisplay();
 }
 
@@ -474,7 +650,7 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(800, 600);
     glutCreateWindow("Bomberman 3D Isometrico");
-
+	glutIgnoreKeyRepeat(1); // Ignora repetição automática de tecla
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
@@ -484,6 +660,7 @@ int main(int argc, char** argv) {
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(special);
+    timer_ativo = true;
     glutTimerFunc(100, timer, 0);
 
     glutMainLoop();
