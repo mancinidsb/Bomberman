@@ -583,12 +583,24 @@ void special(int key, int, int) {
     else if (key == GLUT_KEY_LEFT) dx = -1;
     else if (key == GLUT_KEY_RIGHT) dx = 1;
 
-    int nx = player_x + dx, nz = player_z + dz;
-    // Verifica colisão com paredes, blocos e bombas
-    if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
-        player_x = nx;
-        player_z = nz;
-    }
+	int nx = player_x + dx, nz = player_z + dz;
+
+	// Verifica se há inimigo no destino
+	bool tem_inimigo = false;
+	for (int i = 0; i < enemies.size(); i++) {
+	    if (enemies[i].alive && enemies[i].x == nx && enemies[i].z == nz) {
+	        tem_inimigo = true;
+	        break;
+	    }
+	}
+	
+	// Só anda se o destino for livre, sem bomba nem inimigo
+	if (map[nx][nz] == 0 && !hasBomb(nx, nz) && !tem_inimigo) {
+	    player_x = nx;
+	    player_z = nz;
+	}
+	
+	
     glutPostRedisplay();
 }
 
