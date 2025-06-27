@@ -119,6 +119,48 @@ void drawCube(float r, float g, float b) {
     glutSolidCube(1.0);
 }
 
+
+void drawGameOver() {
+    glDisable(GL_DEPTH_TEST); // Evita que o texto fique escondido
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 800, 0, 600); // Tela 800x600
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(0, 0, 0); // Tela preta
+    glBegin(GL_QUADS);
+        glVertex2i(0, 0);
+        glVertex2i(800, 0);
+        glVertex2i(800, 600);
+        glVertex2i(0, 600);
+    glEnd();
+
+    glColor3f(1.0, 0.0, 0.0); // Texto vermelho
+    glRasterPos2i(330, 300);
+    const char* msg = "GAME OVER";
+    for (int i = 0; msg[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg[i]);
+    }
+    
+    glColor3f(1.0, 1.0, 1.0);
+    glRasterPos2i(310, 270);
+    const char* msg2 = "Press R to restart";
+    for (int i = 0; msg2[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg2[i]);
+    }
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
+
+
 void drawMap() {
     // Desenha o chão branco
     glPushMatrix();
@@ -219,6 +261,10 @@ void display() {
     drawEnemies();
     drawBombs();
     drawExplosions();
+
+    if (!player_alive) {
+        drawGameOver(); // Mostra a tela de Game Over
+    }
 
     glutSwapBuffers();
 }
@@ -347,7 +393,7 @@ void moveEnemies() {
 void timer(int v) {
     vector<Bomba> novas;
     bool player_hit = false;
-    
+    if (!player_alive) return;
     // Movimento dos inimigos a cada 2 ciclos (para não ficar muito rápido)
     static int enemy_move_counter = 0;
     if (++enemy_move_counter >= 2) {
@@ -446,6 +492,16 @@ void keyboard(unsigned char key, int, int) {
     else if (key == 'x') cam_angle_x += 5;
     else if (key == '-') cam_dist += 1.0f;
     else if (key == '+') cam_dist -= 1.0f;
+    else if (key == 'r' || key == 'R') {
+        player_alive = true;
+        player_x = 1;
+        player_z = 1;
+        bombas.clear();
+        initMap(); // reinicia o jogo
+        
+        // Reinicia o timer do jogo
+    	glutTimerFunc(100, timer, 0);
+    }
 
     glutPostRedisplay();
 }
