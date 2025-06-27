@@ -22,6 +22,7 @@ struct Enemy {
 };
 
 vector<Enemy> enemies;
+vector<int> fuga_inimigo;
 const int NUM_ENEMIES = 3; // Total de inimigos (1 original + 2 novos)
 
 float cam_angle_y = 45.0f;
@@ -112,6 +113,8 @@ void initMap() {
             }
         }
     }
+    fuga_inimigo.assign(NUM_ENEMIES, 0);
+
 }
 
 void drawCube(float r, float g, float b) {
@@ -354,14 +357,44 @@ void moveEnemies() {
     for (int i = 0; i < enemies.size(); i++) {
         if (!enemies[i].alive) continue;
         
-        // Escolhe uma direção aleatória
-        int dir = rand() % 4;
         int dx = 0, dz = 0;
+		if (fuga_inimigo[i] > 0) {
+		    // Tenta fugir da posição da bomba
+		    int max_dist = -1;
+		    int best_dx = 0, best_dz = 0;
+		
+		    for (int dir = 0; dir < 4; dir++) {
+		        int test_dx = (dir == 0) ? -1 : (dir == 1) ? 1 : 0;
+		        int test_dz = (dir == 2) ? -1 : (dir == 3) ? 1 : 0;
+		
+		        int nx = enemies[i].x + test_dx;
+		        int nz = enemies[i].z + test_dz;
+		
+		        if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
+		            // Calcula distância até a bomba mais próxima
+		            int min_dist = 1000;
+		            for (size_t b = 0; b < bombas.size(); b++) {
+		                int dist = abs(nx - bombas[b].x) + abs(nz - bombas[b].z);
+		                if (dist < min_dist) min_dist = dist;
+		            }
+		            if (min_dist > max_dist) {
+		                max_dist = min_dist;
+		                best_dx = test_dx;
+		                best_dz = test_dz;
+		            }
+		        }
+		    }
+		
+		    dx = best_dx;
+		    dz = best_dz;
+		    fuga_inimigo[i]--;
+		} else {
+		    // Movimento aleatório normal
+		    int dir = rand() % 4;
+		    dx = (dir == 0) ? -1 : (dir == 1) ? 1 : 0;
+		    dz = (dir == 2) ? -1 : (dir == 3) ? 1 : 0;
+		}
         
-        if (dir == 0) dx = -1;      // esquerda
-        else if (dir == 1) dx = 1;  // direita
-        else if (dir == 2) dz = -1; // cima
-        else if (dir == 3) dz = 1;  // baixo
         
         int nx = enemies[i].x + dx;
         int nz = enemies[i].z + dz;
@@ -387,6 +420,37 @@ void moveEnemies() {
         if (enemies[i].x == player_x && enemies[i].z == player_z && player_alive) {
             player_alive = false; // Jogador morre se tocar em qualquer inimigo
         }
+        
+        // Verifica se há blocos quebráveis ao redor
+		bool perto_de_bloco = false;
+		for (int dx = -1; dx <= 1; dx++) {
+		    for (int dz = -1; dz <= 1; dz++) {
+		        if (abs(dx) + abs(dz) == 1) { // só nas 4 direções (cima, baixo, esquerda, direita)
+		            int nx = enemies[i].x + dx;
+		            int nz = enemies[i].z + dz;
+		            if (map[nx][nz] == 2) {
+		                perto_de_bloco = true;
+		                break;
+		            }
+		        }
+		    }
+		}
+		// Aumenta a chance se estiver perto de bloco
+
+		int chance = perto_de_bloco ? 5 : 20;
+
+		if (rand() % chance == 0 && !hasBomb(enemies[i].x, enemies[i].z)) {
+		    Bomba nova;
+		    nova.x = enemies[i].x;
+		    nova.z = enemies[i].z;
+		    nova.timer = 4;
+		    nova.explodiu = false;
+		    nova.frame_explosao = 0;
+		    bombas.push_back(nova);
+		    fuga_inimigo[i] = 4;
+		}
+        
+ 
     }
 }
 
