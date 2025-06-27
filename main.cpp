@@ -24,6 +24,7 @@ struct Enemy {
 vector<Enemy> enemies;
 vector<int> fuga_inimigo;
 const int NUM_ENEMIES = 3; // Total de inimigos (1 original + 2 novos)
+bool timer_ativo = false;
 
 float cam_angle_y = 45.0f;
 float cam_angle_x = 45.0f;
@@ -540,8 +541,14 @@ void timer(int v) {
         }
     }
 
-    glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
-    glutPostRedisplay();
+    // glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
+    // glutPostRedisplay();
+    
+    if (player_alive || !timer_ativo) {
+	    glutTimerFunc(400, timer, 0);
+	}
+	
+	glutPostRedisplay();
 }
 
 
@@ -569,7 +576,11 @@ void keyboard(unsigned char key, int, int) {
         initMap(); // reinicia o jogo
         
         // Reinicia o timer do jogo
-    	glutTimerFunc(100, timer, 0);
+    	// glutTimerFunc(100, timer, 0);
+    	if (!timer_ativo) {
+	        timer_ativo = true;
+	        glutTimerFunc(100, timer, 0);
+	    }
     }
 
     glutPostRedisplay();
@@ -618,7 +629,7 @@ int main(int argc, char** argv) {
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(800, 600);
     glutCreateWindow("Bomberman 3D Isometrico");
-
+	glutIgnoreKeyRepeat(1); // Ignora repetição automática de tecla
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
@@ -628,6 +639,7 @@ int main(int argc, char** argv) {
     glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(special);
+    timer_ativo = true;
     glutTimerFunc(100, timer, 0);
 
     glutMainLoop();
