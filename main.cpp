@@ -1,7 +1,8 @@
 /*
  * Bomberman 3D com visao isometrica (versao compativel com GCC 4.4.1)
  */
-
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #include <GL/glut.h>
 #include <vector>
 #include <cstdlib>
@@ -11,6 +12,11 @@ using namespace std;
 
 #define MAP_SIZE 13
 #define ESC 27
+
+// Texturas
+GLuint tex_grama;
+GLuint tex_azulejo;
+GLuint tex_tijolo;
 
 int map[MAP_SIZE][MAP_SIZE]; // 0: vazio, 1: parede, 2: bloco destruivel
 int player_x = 1, player_z = 1;
@@ -27,8 +33,8 @@ const int NUM_ENEMIES = 3; // Total de inimigos (1 original + 2 novos)
 bool timer_ativo = false;
 
 float cam_angle_y = 45.0f;
-float cam_angle_x = 45.0f;
-float cam_dist = 18.0f; // Aumentado para acomodar o mapa maior
+float cam_angle_x = 30.0f;
+float cam_dist = 20.0f; // Aumentado para acomodar o mapa maior
 
 struct Bomba {
     int x, z;
@@ -38,6 +44,27 @@ struct Bomba {
 };
 
 vector<Bomba> bombas;
+
+GLuint loadTexture(const char* filename) {
+    int width, height, channels;
+    unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+    if (!data) {
+        printf("Erro ao carregar imagem: %s\n", filename);
+        exit(1);
+    }
+    printf("Textura carregada: %s (%dx%d, %d canais)\n", filename, width, height, channels);
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, 
+                 channels == 4 ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    stbi_image_free(data);
+    return tex;
+}
 
 void initMap() {
     for (int x = 0; x < MAP_SIZE; x++) {
@@ -123,6 +150,50 @@ void drawCube(float r, float g, float b) {
     glutSolidCube(1.0);
 }
 
+void drawCubeTextured(GLuint tex) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glColor3f(1,1,1);
+
+    float s = 0.5f;
+    float repeat = 2.0f; // Ajuste para mais repetições se quiser
+
+    glBegin(GL_QUADS);
+    // Frente
+    glTexCoord2f(0,0); glVertex3f(-s,-s, s);
+    glTexCoord2f(repeat,0); glVertex3f( s,-s, s);
+    glTexCoord2f(repeat,repeat); glVertex3f( s, s, s);
+    glTexCoord2f(0,repeat); glVertex3f(-s, s, s);
+    // Trás
+    glTexCoord2f(0,0); glVertex3f( s,-s,-s);
+    glTexCoord2f(repeat,0); glVertex3f(-s,-s,-s);
+    glTexCoord2f(repeat,repeat); glVertex3f(-s, s,-s);
+    glTexCoord2f(0,repeat); glVertex3f( s, s,-s);
+    // Direita
+    glTexCoord2f(0,0); glVertex3f( s,-s, s);
+    glTexCoord2f(repeat,0); glVertex3f( s,-s,-s);
+    glTexCoord2f(repeat,repeat); glVertex3f( s, s,-s);
+    glTexCoord2f(0,repeat); glVertex3f( s, s, s);
+    // Esquerda
+    glTexCoord2f(0,0); glVertex3f(-s,-s,-s);
+    glTexCoord2f(repeat,0); glVertex3f(-s,-s, s);
+    glTexCoord2f(repeat,repeat); glVertex3f(-s, s, s);
+    glTexCoord2f(0,repeat); glVertex3f(-s, s,-s);
+    // Topo
+    glTexCoord2f(0,0); glVertex3f(-s, s, s);
+    glTexCoord2f(repeat,0); glVertex3f( s, s, s);
+    glTexCoord2f(repeat,repeat); glVertex3f( s, s,-s);
+    glTexCoord2f(0,repeat); glVertex3f(-s, s,-s);
+    // Base
+    glTexCoord2f(0,0); glVertex3f(-s,-s,-s);
+    glTexCoord2f(repeat,0); glVertex3f( s,-s,-s);
+    glTexCoord2f(repeat,repeat); glVertex3f( s,-s, s);
+    glTexCoord2f(0,repeat); glVertex3f(-s,-s, s);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+}
+
 
 void drawGameOver() {
     glDisable(GL_DEPTH_TEST); // Evita que o texto fique escondido
@@ -163,24 +234,34 @@ void drawGameOver() {
     glEnable(GL_DEPTH_TEST);
 }
 
+void drawGroundTextured() {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, tex_grama);
+    glColor3f(1,1,1); // Para não alterar a cor da textura
 
+    float y = -1.0f;
+    float size = (float)MAP_SIZE;
+    glBegin(GL_QUADS);
+        glTexCoord2f(0, 0); glVertex3f(0, y, 0);
+        glTexCoord2f(1, 0); glVertex3f(size, y, 0);
+        glTexCoord2f(1, 1); glVertex3f(size, y, size);
+        glTexCoord2f(0, 1); glVertex3f(0, y, size);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+}
 
 void drawMap() {
     // Desenha o chão branco
-    glPushMatrix();
-    glTranslatef(MAP_SIZE / 2.0f - 0.5f, -1.0f, MAP_SIZE / 2.0f - 0.5f); // Centraliza
-    glScalef((float)MAP_SIZE, 0.1f, (float)MAP_SIZE); // Tamanho do chão
-    glColor3f(1.0f, 1.0f, 1.0f); // <- Aqui é onde você pode mudar a cor do chão
-    glutSolidCube(1.0f);
-    glPopMatrix();
+    drawGroundTextured();
     for (int x = 0; x < MAP_SIZE; x++) {
         for (int z = 0; z < MAP_SIZE; z++) {
             glPushMatrix();
             glTranslatef((float)x, -0.5f, (float)z);
             if (map[x][z] == 1)
-                drawCube(0.3f, 0.3f, 0.3f); // parede
+                drawCubeTextured(tex_azulejo);
             else if (map[x][z] == 2)
-                drawCube(0.6f, 0.4f, 0.2f); // bloco
+                drawCubeTextured(tex_tijolo);
             glPopMatrix();
         }
     }
@@ -652,6 +733,10 @@ int main(int argc, char** argv) {
     glutCreateWindow("Bomberman 3D Isometrico");
 	glutIgnoreKeyRepeat(1); // Ignora repetição automática de tecla
     glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE_2D);
+    tex_grama = loadTexture("assets/grass.jpg");
+    tex_azulejo = loadTexture("assets/tiles.jpg"); 
+    tex_tijolo = loadTexture("assets/brick.jpg");
     glClearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
     initMap();
