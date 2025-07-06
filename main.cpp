@@ -8,19 +8,59 @@
 #include <cstdlib>
 #include <ctime>
 #include <cmath>
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
 using namespace std;
 
 #define MAP_SIZE 13
 #define ESC 27
+
+struct Model {
+    std::vector<float> vertices;
+    std::vector<float> normals;
+    std::vector<float> texcoords;
+    std::vector<unsigned int> indices;
+    std::vector<int> material_ids; // IDs dos materiais para cada vértice
+    std::vector<tinyobj::material_t> materials; // Lista de materiais
+};
+
+// Declarações de funções
+void updateCamera();
+void display();
+void drawMap();
+void drawPlayer();
+void drawEnemies();
+void drawBombs();
+void drawExplosions();
+void drawGameOver();
+void drawGroundTextured();
+void drawCube(float r, float g, float b);
+void drawCubeTextured(GLuint tex);
+void drawModel(const Model& model);
+void drawModelWithColor(const Model& model, float r, float g, float b);
+bool loadModel(const char* filename, Model& model);
+GLuint loadTexture(const char* filename);
+void initMap();
+void timer(int v);
+void keyboard(unsigned char key, int, int);
+void special(int key, int, int);
+void reshape(int w, int h);
+bool hasBomb(int x, int z);
+bool playerInExplosion(int bomb_x, int bomb_z);
+int enemyInExplosion(int bomb_x, int bomb_z);
+void checkBombChainReaction(int bomb_x, int bomb_z);
+void moveEnemies();
 
 // Texturas
 GLuint tex_grama;
 GLuint tex_azulejo;
 GLuint tex_tijolo;
 
-int map[MAP_SIZE][MAP_SIZE]; // 0: vazio, 1: parede, 2: bloco destruivel
+int gameMap[MAP_SIZE][MAP_SIZE]; // 0: vazio, 1: parede, 2: bloco destruivel
 int player_x = 1, player_z = 1;
 bool player_alive = true;
+
+Model playerModel;
 
 struct Enemy {
     int x, z;
@@ -52,7 +92,6 @@ GLuint loadTexture(const char* filename) {
         printf("Erro ao carregar imagem: %s\n", filename);
         exit(1);
     }
-    printf("Textura carregada: %s (%dx%d, %d canais)\n", filename, width, height, channels);
     GLuint tex;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -70,18 +109,18 @@ void initMap() {
     for (int x = 0; x < MAP_SIZE; x++) {
         for (int z = 0; z < MAP_SIZE; z++) {
             if (x == 0 || z == 0 || x == MAP_SIZE - 1 || z == MAP_SIZE - 1)
-                map[x][z] = 1; // parede
+                gameMap[x][z] = 1; // parede
             else if ((x % 2 == 0 && z % 2 == 0))
-                map[x][z] = 1; // parede fixa
+                gameMap[x][z] = 1; // parede fixa
             else
-                map[x][z] = (rand() % 4 == 0 ? 2 : 0); // bloco aleatorio ou vazio
+                gameMap[x][z] = (rand() % 4 == 0 ? 2 : 0); // bloco aleatorio ou vazio
         }
     }
     
     // Garante uma área segura para o jogador iniciar
-    map[1][1] = 0; // posição inicial do jogador
-    map[1][2] = 0; // caminho para baixo
-    map[2][1] = 0; // caminho para direita
+    gameMap[1][1] = 0; // posição inicial do jogador
+    gameMap[1][2] = 0; // caminho para baixo
+    gameMap[2][1] = 0; // caminho para direita
     
     // Garante que o jogador tenha pelo menos um caminho para explorar
     // Cria um caminho aleatório a partir da posição inicial
@@ -98,7 +137,7 @@ void initMap() {
                 current_x++;
             }
             if (current_x < MAP_SIZE - 1)
-                map[current_x][current_z] = 0; // limpa o caminho
+                gameMap[current_x][current_z] = 0; // limpa o caminho
         } else if (current_z < MAP_SIZE - 2) {
             current_z++;
             // Se for uma parede fixa, pula
@@ -106,7 +145,7 @@ void initMap() {
                 current_z++;
             }
             if (current_z < MAP_SIZE - 1)
-                map[current_x][current_z] = 0; // limpa o caminho
+                gameMap[current_x][current_z] = 0; // limpa o caminho
         }
     }
     
@@ -122,7 +161,7 @@ void initMap() {
             int z = rand() % (MAP_SIZE - 2) + 1;
             
             // Verifica se a posição é válida (vazia e não muito perto do jogador)
-            if (map[x][z] == 0 && (abs(x - player_x) + abs(z - player_z) >= 4)) {
+            if (gameMap[x][z] == 0 && (abs(x - player_x) + abs(z - player_z) >= 4)) {
                 // Verifica se não está na mesma posição que outro inimigo
                 bool overlap = false;
                 for (int j = 0; j < i; j++) {
@@ -143,6 +182,118 @@ void initMap() {
     }
     fuga_inimigo.assign(NUM_ENEMIES, 0);
 
+}
+
+bool loadModel(const char* filename, Model& model) {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warn, err;
+
+    // Extrai o diretório do arquivo OBJ
+    std::string obj_path = filename;
+    size_t last_slash = obj_path.find_last_of("/\\");
+    std::string base_path = (last_slash != std::string::npos) ? obj_path.substr(0, last_slash + 1) : "";
+
+    if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename, base_path.c_str())) {
+        // printf("Erro ao carregar modelo: %s\n", err.c_str());
+        return false;
+    }
+
+    // printf("Materiais carregados: %zu\n", materials.size());
+    // for (size_t i = 0; i < materials.size(); i++) {
+    //     printf("Material %zu: (%.3f, %.3f, %.3f)\n", i, 
+    //            materials[i].diffuse[0], materials[i].diffuse[1], materials[i].diffuse[2]);
+    // }
+
+    // Armazena os materiais
+    model.materials = materials;
+
+    // Processa os dados do modelo
+    for (const auto& shape : shapes) {
+        // printf("Shape: %s, faces: %zu, material_ids: %zu\n", 
+        //        shape.name.c_str(), shape.mesh.num_face_vertices.size(), shape.mesh.material_ids.size());
+        
+        // Processa cada face (triângulo)
+        size_t index_offset = 0;
+        for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); face++) {
+            int material_id = (face < shape.mesh.material_ids.size()) ? shape.mesh.material_ids[face] : -1;
+            
+            // Cada face tem 3 vértices (triângulo)
+            for (size_t v = 0; v < 3; v++) {
+                const auto& index = shape.mesh.indices[index_offset + v];
+                
+                model.vertices.push_back(attrib.vertices[3 * index.vertex_index + 0]);
+                model.vertices.push_back(attrib.vertices[3 * index.vertex_index + 1]);
+                model.vertices.push_back(attrib.vertices[3 * index.vertex_index + 2]);
+
+                if (index.normal_index >= 0) {
+                    model.normals.push_back(attrib.normals[3 * index.normal_index + 0]);
+                    model.normals.push_back(attrib.normals[3 * index.normal_index + 1]);
+                    model.normals.push_back(attrib.normals[3 * index.normal_index + 2]);
+                }
+
+                if (index.texcoord_index >= 0) {
+                    model.texcoords.push_back(attrib.texcoords[2 * index.texcoord_index + 0]);
+                    model.texcoords.push_back(attrib.texcoords[2 * index.texcoord_index + 1]);
+                }
+
+                // Cada vértice da face usa o mesmo material
+                model.material_ids.push_back(material_id);
+            }
+            
+            index_offset += 3; // Próxima face
+        }
+    }
+    
+    // printf("Vértices carregados: %zu\n", model.vertices.size() / 3);
+    // printf("Materiais carregados: %zu\n", model.materials.size());
+    
+    return true;
+}
+
+void drawModelWithColor(const Model& model, float r, float g, float b) {
+    glBegin(GL_TRIANGLES);
+    for (size_t i = 0; i < model.vertices.size(); i += 3) {
+        // Aplica a cor personalizada
+        glColor3f(r, g, b);
+        
+        // Aplica normal se disponível
+        if (i < model.normals.size()) {
+            glNormal3f(model.normals[i], model.normals[i+1], model.normals[i+2]);
+        }
+        
+        glVertex3f(model.vertices[i], model.vertices[i+1], model.vertices[i+2]);
+    }
+    glEnd();
+}
+
+void drawModel(const Model& model) {
+    glBegin(GL_TRIANGLES);
+    for (size_t i = 0; i < model.vertices.size(); i += 3) {
+        // Aplica a cor do material
+        int material_id = model.material_ids[i / 3];
+        if (material_id >= 0 && material_id < model.materials.size()) {
+            const auto& material = model.materials[material_id];
+            glColor3f(material.diffuse[0], material.diffuse[1], material.diffuse[2]);
+            // Debug: print dos primeiros materiais usados
+            // if (i < 30) { // Primeiros 10 triângulos
+            //     printf("Triângulo %zu: Material %d, Cor (%.3f, %.3f, %.3f)\n", 
+            //            i/3, material_id, material.diffuse[0], material.diffuse[1], material.diffuse[2]);
+            // }
+        } else {
+            // Cor padrão se não houver material
+            glColor3f(1.0f, 1.0f, 1.0f);
+        }
+        
+        // Aplica normal se disponível
+        if (i < model.normals.size()) {
+            glNormal3f(model.normals[i], model.normals[i+1], model.normals[i+2]);
+        }
+        
+        glVertex3f(model.vertices[i], model.vertices[i+1], model.vertices[i+2]);
+    }
+    glEnd();
 }
 
 void drawCube(float r, float g, float b) {
@@ -258,9 +409,9 @@ void drawMap() {
         for (int z = 0; z < MAP_SIZE; z++) {
             glPushMatrix();
             glTranslatef((float)x, -0.5f, (float)z);
-            if (map[x][z] == 1)
+            if (gameMap[x][z] == 1)
                 drawCubeTextured(tex_azulejo);
-            else if (map[x][z] == 2)
+            else if (gameMap[x][z] == 2)
                 drawCubeTextured(tex_tijolo);
             glPopMatrix();
         }
@@ -271,8 +422,8 @@ void drawPlayer() {
     if (player_alive) {
         glPushMatrix();
         glTranslatef((float)player_x, 0.0f, (float)player_z);
-        glColor3f(0.0f, 0.0f, 1.0f);
-        glutSolidSphere(0.4, 16, 16);
+        glScalef(0.5f, 0.5f, 0.5f); // Ajuste o tamanho conforme necessário
+        drawModel(playerModel);
         glPopMatrix();
     }
 }
@@ -282,11 +433,8 @@ void drawEnemies() {
         if (enemies[i].alive) {
             glPushMatrix();
             glTranslatef((float)enemies[i].x, 0.0f, (float)enemies[i].z);
-            
-            // Todos os inimigos com a mesma cor vermelha
-            glColor3f(1.0f, 0.0f, 0.0f); // Vermelho
-            
-            glutSolidSphere(0.4, 16, 16);
+            glScalef(0.5f, 0.5f, 0.5f); // Mesmo tamanho do jogador
+            drawModelWithColor(playerModel, 1.0f, 0.0f, 0.0f);
             glPopMatrix();
         }
     }
@@ -330,7 +478,7 @@ void drawExplosions() {
 			            int nz = bombas[i].z + dz;
 			
 			            // Só desenha explosão se não for parede sólida
-			            if (map[nx][nz] != 1) {
+			            if (gameMap[nx][nz] != 1) {
 			                glPushMatrix();
 			                glTranslatef((float)nx, 0.0f, (float)nz);
 			                glutSolidSphere(0.3, 10, 10);
@@ -342,18 +490,6 @@ void drawExplosions() {
             bombas[i].frame_explosao--;
         }
     }
-}
-
-void updateCamera() {
-    float rad_y = cam_angle_y * 3.141592f / 180.0f;
-    float rad_x = cam_angle_x * 3.141592f / 180.0f;
-
-    float eye_x = cam_dist * cos(rad_x) * sin(rad_y);
-    float eye_y = cam_dist * sin(rad_x);
-    float eye_z = cam_dist * cos(rad_x) * cos(rad_y);
-
-    // Ajustado para olhar para o centro do mapa 13x13
-    gluLookAt(eye_x, eye_y, eye_z, 6, 0, 6, 0, 1, 0);
 }
 
 void display() {
@@ -369,10 +505,33 @@ void display() {
     drawExplosions();
 
     if (!player_alive) {
-        drawGameOver(); // Mostra a tela de Game Over
+        drawGameOver();
     }
 
     glutSwapBuffers();
+}
+
+void updateCamera() {
+    float rad_y = cam_angle_y * 3.141592f / 180.0f;
+    float rad_x = cam_angle_x * 3.141592f / 180.0f;
+
+    float eye_x = cam_dist * cos(rad_x) * sin(rad_y);
+    float eye_y = cam_dist * sin(rad_x);
+    float eye_z = cam_dist * cos(rad_x) * cos(rad_y);
+
+    // Ajustado para olhar para o centro do mapa 13x13
+    gluLookAt(eye_x, eye_y, eye_z, 6, 0, 6, 0, 1, 0);
+}
+
+// Verifica se há uma bomba na posição (x,z)
+bool hasBomb(int x, int z) {
+    for (size_t i = 0; i < bombas.size(); i++) {
+        if (!bombas[i].explodiu && bombas[i].timer > 0 && 
+            bombas[i].x == x && bombas[i].z == z) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Verifica se o jogador está na explosão
@@ -387,7 +546,7 @@ bool playerInExplosion(int bomb_x, int bomb_z) {
             if (abs(dx) + abs(dz) == 1) {
                 int nx = bomb_x + dx, nz = bomb_z + dz;
                 // Só verifica se não há parede bloqueando
-                if (map[nx][nz] != 1 && player_x == nx && player_z == nz)
+                if (gameMap[nx][nz] != 1 && player_x == nx && player_z == nz)
                     return true;
             }
         }
@@ -411,7 +570,7 @@ int enemyInExplosion(int bomb_x, int bomb_z) {
                 if (abs(dx) + abs(dz) == 1) {
                     int nx = bomb_x + dx, nz = bomb_z + dz;
                     // Só verifica se não há parede bloqueando
-                    if (map[nx][nz] != 1 && enemies[i].x == nx && enemies[i].z == nz)
+                    if (gameMap[nx][nz] != 1 && enemies[i].x == nx && enemies[i].z == nz)
                         return i;
                 }
             }
@@ -434,7 +593,7 @@ void checkBombChainReaction(int bomb_x, int bomb_z) {
                     if (abs(dx) + abs(dz) == 1) {
                         int nx = bomb_x + dx, nz = bomb_z + dz;
                         // Só verifica se não há parede bloqueando
-                        if (map[nx][nz] != 1 && 
+                        if (gameMap[nx][nz] != 1 && 
                             bombas[j].x == nx && bombas[j].z == nz)
                             bombas[j].timer = 0;
                     }
@@ -442,17 +601,6 @@ void checkBombChainReaction(int bomb_x, int bomb_z) {
             }
         }
     }
-}
-
-// Verifica se há uma bomba na posição (x,z)
-bool hasBomb(int x, int z) {
-    for (size_t i = 0; i < bombas.size(); i++) {
-        if (!bombas[i].explodiu && bombas[i].timer > 0 && 
-            bombas[i].x == x && bombas[i].z == z) {
-            return true;
-        }
-    }
-    return false;
 }
 
 // Movimento aleatório dos inimigos
@@ -473,7 +621,7 @@ void moveEnemies() {
 		        int nx = enemies[i].x + test_dx;
 		        int nz = enemies[i].z + test_dz;
 		
-		        if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
+		        if (gameMap[nx][nz] == 0 && !hasBomb(nx, nz)) {
 		            // Calcula distância até a bomba mais próxima
 		            int min_dist = 1000;
 		            for (size_t b = 0; b < bombas.size(); b++) {
@@ -503,7 +651,7 @@ void moveEnemies() {
         int nz = enemies[i].z + dz;
         
         // Verifica se o movimento é válido (não colide com paredes, blocos ou bombas)
-        if (map[nx][nz] == 0 && !hasBomb(nx, nz)) {
+        if (gameMap[nx][nz] == 0 && !hasBomb(nx, nz)) {
             // Verifica se não colide com outro inimigo
             bool collision = false;
             for (int j = 0; j < enemies.size(); j++) {
@@ -531,7 +679,7 @@ void moveEnemies() {
 		            int nx = enemies[i].x + dx;
 		            int nz = enemies[i].z + dz;
 		
-		            if (map[nx][nz] == 2)
+		            if (gameMap[nx][nz] == 2)
 		                perto_de_bloco = true;
 		
 		            if (player_alive && player_x == nx && player_z == nz)
@@ -566,6 +714,7 @@ void timer(int v) {
     vector<Bomba> novas;
     bool player_hit = false;
     if (!player_alive) return;
+    
     // Movimento dos inimigos a cada 2 ciclos (para não ficar muito rápido)
     static int enemy_move_counter = 0;
     if (++enemy_move_counter >= 2) {
@@ -585,7 +734,7 @@ void timer(int v) {
                 for (int dz = -1; dz <= 1; dz++) {
                     if (abs(dx) + abs(dz) == 1) {
                         int nx = bombas[i].x + dx, nz = bombas[i].z + dz;
-                        if (map[nx][nz] == 2) map[nx][nz] = 0;
+                        if (gameMap[nx][nz] == 2) gameMap[nx][nz] = 0;
                     }
                 }
             }
@@ -643,9 +792,6 @@ void timer(int v) {
         }
     }
 
-    // glutTimerFunc(400, timer, 0); // Diminua aqui se quiser animacaes mais rapidas (ex: 100)
-    // glutPostRedisplay();
-    
     if (player_alive || !timer_ativo) {
 	    glutTimerFunc(400, timer, 0);
 	}
@@ -678,7 +824,6 @@ void keyboard(unsigned char key, int, int) {
         initMap(); // reinicia o jogo
         
         // Reinicia o timer do jogo
-    	// glutTimerFunc(100, timer, 0);
     	if (!timer_ativo) {
 	        timer_ativo = true;
 	        glutTimerFunc(100, timer, 0);
@@ -708,7 +853,7 @@ void special(int key, int, int) {
 	}
 	
 	// Só anda se o destino for livre, sem bomba nem inimigo
-	if (map[nx][nz] == 0 && !hasBomb(nx, nz) && !tem_inimigo) {
+	if (gameMap[nx][nz] == 0 && !hasBomb(nx, nz) && !tem_inimigo) {
 	    player_x = nx;
 	    player_z = nz;
 	}
@@ -734,9 +879,35 @@ int main(int argc, char** argv) {
 	glutIgnoreKeyRepeat(1); // Ignora repetição automática de tecla
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_TEXTURE_2D);
+    
+    // Configuração de iluminação básica
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    
+    // Posição da luz
+    GLfloat light_position[] = { 10.0f, 10.0f, 10.0f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+    
+    // Cor da luz ambiente
+    GLfloat light_ambient[] = { 0.3f, 0.3f, 0.3f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient);
+    
+    // Cor da luz difusa
+    GLfloat light_diffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
+    
+    // Carrega as texturas
     tex_grama = loadTexture("assets/grass.jpg");
     tex_azulejo = loadTexture("assets/tiles.jpg"); 
     tex_tijolo = loadTexture("assets/brick.jpg");
+    
+    // Carrega o modelo do jogador
+    if (!loadModel("assets/bomberman.obj", playerModel)) {
+        printf("Falha ao carregar modelo do jogador\n");
+        exit(1);
+    }
+    
     glClearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
     initMap();
