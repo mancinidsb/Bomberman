@@ -3,7 +3,16 @@
  */
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-#include <GL/glut.h>
+#ifdef __APPLE__
+    #define GL_SILENCE_DEPRECATION
+    #include <GLUT/glut.h>
+    #include <OpenGL/gl.h>
+    #include <OpenGL/glu.h>
+#else
+    #include <GL/glut.h>
+    #include <GL/gl.h>
+    #include <GL/glu.h>
+#endif
 #include <vector>
 #include <cstdlib>
 #include <ctime>
@@ -33,6 +42,7 @@ void drawEnemies();
 void drawBombs();
 void drawExplosions();
 void drawGameOver();
+void drawVictory();
 void drawGroundTextured();
 void drawCube(float r, float g, float b);
 void drawCubeTextured(GLuint tex);
@@ -59,6 +69,7 @@ GLuint tex_tijolo;
 int gameMap[MAP_SIZE][MAP_SIZE]; // 0: vazio, 1: parede, 2: bloco destruivel
 int player_x = 1, player_z = 1;
 bool player_alive = true;
+bool player_won = false; // Nova variável para controlar vitória
 
 Model playerModel;
 
@@ -81,6 +92,7 @@ struct Bomba {
     int timer;
     bool explodiu;
     int frame_explosao;
+    bool jogador; // true se for bomba do jogador, false se for de inimigo
 };
 
 vector<Bomba> bombas;
@@ -200,19 +212,12 @@ bool loadModel(const char* filename, Model& model) {
         return false;
     }
 
-    // printf("Materiais carregados: %zu\n", materials.size());
-    // for (size_t i = 0; i < materials.size(); i++) {
-    //     printf("Material %zu: (%.3f, %.3f, %.3f)\n", i, 
-    //            materials[i].diffuse[0], materials[i].diffuse[1], materials[i].diffuse[2]);
-    // }
 
     // Armazena os materiais
     model.materials = materials;
 
     // Processa os dados do modelo
     for (const auto& shape : shapes) {
-        // printf("Shape: %s, faces: %zu, material_ids: %zu\n", 
-        //        shape.name.c_str(), shape.mesh.num_face_vertices.size(), shape.mesh.material_ids.size());
         
         // Processa cada face (triângulo)
         size_t index_offset = 0;
@@ -385,6 +390,45 @@ void drawGameOver() {
     glEnable(GL_DEPTH_TEST);
 }
 
+void drawVictory() {
+    glDisable(GL_DEPTH_TEST); // Evita que o texto fique escondido
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, 800, 0, 600); // Tela 800x600
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(0, 0.3f, 0); // Tela verde escuro
+    glBegin(GL_QUADS);
+        glVertex2i(0, 0);
+        glVertex2i(800, 0);
+        glVertex2i(800, 600);
+        glVertex2i(0, 600);
+    glEnd();
+
+    glColor3f(1.0, 1.0, 0.0); // Texto amarelo
+    glRasterPos2i(330, 300);
+    const char* msg = "VICTORY!";
+    for (int i = 0; msg[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg[i]);
+    }
+    
+    glColor3f(1.0, 1.0, 1.0);
+    glRasterPos2i(310, 270);
+    const char* msg2 = "Press R to restart";
+    for (int i = 0; msg2[i] != '\0'; i++) {
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, msg2[i]);
+    }
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
+}
+
 void drawGroundTextured() {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, tex_grama);
@@ -506,6 +550,8 @@ void display() {
 
     if (!player_alive) {
         drawGameOver();
+    } else if (player_won) {
+        drawVictory();
     }
 
     glutSwapBuffers();
@@ -526,7 +572,8 @@ void updateCamera() {
 // Verifica se há uma bomba na posição (x,z)
 bool hasBomb(int x, int z) {
     for (size_t i = 0; i < bombas.size(); i++) {
-        if (!bombas[i].explodiu && bombas[i].timer > 0 && 
+        // Verifica se há uma bomba ativa (não explodiu e timer > 0) OU se está explodindo (frame_explosao > 0)
+        if (((!bombas[i].explodiu && bombas[i].timer > 0) || bombas[i].frame_explosao > 0) && 
             bombas[i].x == x && bombas[i].z == z) {
             return true;
         }
@@ -700,6 +747,7 @@ void moveEnemies() {
 		    nova.timer = 4;
 		    nova.explodiu = false;
 		    nova.frame_explosao = 0;
+		    nova.jogador = false;
 		    bombas.push_back(nova);
 		    fuga_inimigo[i] = 4; // inimigo entra em fuga imediatamente
 		}
@@ -788,7 +836,7 @@ void timer(int v) {
         
         if (all_enemies_dead) {
             // Jogador venceu
-            // Aqui você pode adicionar código para passar para o próximo nível ou mostrar uma mensagem
+            player_won = true;
         }
     }
 
@@ -803,13 +851,41 @@ void timer(int v) {
 void keyboard(unsigned char key, int, int) {
     if (key == ESC) exit(0);
     if (key == ' ') {
-        Bomba nova;
-        nova.x = player_x;
-        nova.z = player_z;
-        nova.timer = 4;
-        nova.explodiu = false;
-        nova.frame_explosao = 0;
-        bombas.push_back(nova);
+        // Debug: mostra informações sobre bombas existentes
+        printf("Tentando plantar bomba na posição (%d, %d)\n", player_x, player_z);
+        printf("Total de bombas: %zu\n", bombas.size());
+        
+        for (size_t i = 0; i < bombas.size(); i++) {
+            printf("Bomba %zu: pos(%d,%d) timer=%d explodiu=%s frame_explosao=%d\n", 
+                   i, bombas[i].x, bombas[i].z, bombas[i].timer, 
+                   bombas[i].explodiu ? "true" : "false", bombas[i].frame_explosao);
+        }
+        
+        // Verifica se existe qualquer bomba ativa do jogador
+        bool tem_bomba_ativa = false;
+        for (size_t i = 0; i < bombas.size(); i++) {
+            if (bombas[i].jogador && ((!bombas[i].explodiu && bombas[i].timer > 0) || bombas[i].frame_explosao > 0)) {
+                tem_bomba_ativa = true;
+                break;
+            }
+        }
+        
+        printf("Existe bomba ativa do jogador: %s\n", tem_bomba_ativa ? "true" : "false");
+        
+        // Só planta nova bomba se não houver nenhuma bomba ativa do jogador
+        if (!tem_bomba_ativa) {
+            printf("Plantando nova bomba!\n");
+            Bomba nova;
+            nova.x = player_x;
+            nova.z = player_z;
+            nova.timer = 4;
+            nova.explodiu = false;
+            nova.frame_explosao = 0;
+            nova.jogador = true;
+            bombas.push_back(nova);
+        } else {
+            printf("Já existe bomba ativa, não pode plantar nova!\n");
+        }
     } else if (key == 'q') cam_angle_y -= 5;
     else if (key == 'e') cam_angle_y += 5;
     else if (key == 'z') cam_angle_x -= 5;
@@ -818,16 +894,13 @@ void keyboard(unsigned char key, int, int) {
     else if (key == '+') cam_dist -= 1.0f;
     else if (key == 'r' || key == 'R') {
         player_alive = true;
+        player_won = false; // Reset do estado de vitória
         player_x = 1;
         player_z = 1;
         bombas.clear();
         initMap(); // reinicia o jogo
-        
-        // Reinicia o timer do jogo
-    	if (!timer_ativo) {
-	        timer_ativo = true;
-	        glutTimerFunc(100, timer, 0);
-	    }
+        timer_ativo = true;
+        glutTimerFunc(100, timer, 0);
     }
 
     glutPostRedisplay();
